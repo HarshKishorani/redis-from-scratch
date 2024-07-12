@@ -14,7 +14,19 @@ int main(int argc, char **argv)
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
 
-  // Uncomment this block to pass the first stage
+  /*
+  The steps involved in establishing a socket on the client side are as follows:
+    Create a socket with the socket() system call
+      - Connect the socket to the address of the server using the connect() system call
+      - Send and receive data. There are a number of ways to do this, but the simplest is to use the read() and write() system calls.
+      - The steps involved in establishing a socket on the server side are as follows:
+
+    Create a socket with the socket() system call
+      - Bind the socket to an address using the bind() system call. For a server socket on the Internet, an address consists of a port number on the host machine.
+      - Listen for connections with the listen() system call
+      - Accept a connection with the accept() system call. This call typically blocks until a client connects with the server.
+      - Send and receive data
+  */
 
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0)
@@ -55,7 +67,9 @@ int main(int argc, char **argv)
 
   std::cout << "Waiting for a client to connect...\n";
 
-  accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+  int client = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+  std::string message = "+PONG\r\n";
+  send(client, message.c_str(), message.length(), 0);
   std::cout << "Client connected\n";
 
   close(server_fd);
