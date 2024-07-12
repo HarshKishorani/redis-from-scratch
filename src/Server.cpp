@@ -7,6 +7,26 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#define BUFFER_SIZE 128
+
+void handle(int fd)
+{
+  std::string message = "+PONG\r\n";
+  char buff[BUFFER_SIZE] = "";
+  bzero(&buff, sizeof(buff)); // The bzero() function shall place n zero-valued bytes in the area pointed to by s.
+  while (1)
+  {
+    memset(&buff, '\0', sizeof(buff));
+    recv(fd, buff, 15, 0);                             // The recv(), recvfrom(), and recvmsg() calls are used to receive messages from a socket.
+    if (strcasecmp(buff, "*1\r\n$4\r\nping\r\n") != 0) // Compare received buffer with "Ping" in redis encoding
+    {
+      bzero(&buff, sizeof(buff));
+      continue;
+    }
+    send(fd, message.c_str(), message.length(), 0);
+  }
+  return;
+}
 
 int main(int argc, char **argv)
 {
@@ -67,10 +87,9 @@ int main(int argc, char **argv)
 
   std::cout << "Waiting for a client to connect...\n";
 
-  int client = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-  std::string message = "+PONG\r\n";
-  send(client, message.c_str(), message.length(), 0);
+  int clientFd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
   std::cout << "Client connected\n";
+  handle(clientFd);
 
   close(server_fd);
 
