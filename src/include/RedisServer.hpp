@@ -6,8 +6,9 @@
 #include <netdb.h>
 #include <cstring>
 #include <thread>
-#include <vector>
 #include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
+#include <unordered_map>
+#include <cassert>
 
 class RedisServer
 {
@@ -30,6 +31,7 @@ private:
     int PORT = 6379;
     int CONNECTION_BACKLOG = 5;
     int server_fd_ = -1;
+    std::unordered_map<std::string, std::string> umap;
 
     void handleRequest(int fd)
     {
@@ -46,8 +48,8 @@ private:
                 return;
             }
 
-            resp::result res = dec.decode(buff, std::strlen(buff));
-            resp::unique_value rep = res.value();
+            resp::result request = dec.decode(buff, std::strlen(buff));
+            resp::unique_value rep = request.value();
             if ((rep.type() == resp::ty_array) && (rep.array()[0].type() == resp::ty_bulkstr))
             {
                 std::string command = rep.array()[0].bulkstr().data();
@@ -68,6 +70,39 @@ private:
                     {
                         // Handle error: echo command without a message
                         std::string error_response = "-ERR wrong number of arguments for 'echo' command\r\n";
+                        send(fd, error_response.c_str(), error_response.length(), 0);
+                    }
+                }
+                else if (strcasecmp(command.c_str(), "set") == 0)
+                {
+                    if (rep.array().size() > 2 && rep.array()[1].type() == resp::ty_bulkstr)
+                    {
+                        std::string key = rep.array()[1].bulkstr().data();
+                        std::string value = rep.array()[2].bulkstr().data();
+                        umap[key] = value;
+                        assert(umap[key] == value);
+                        send(fd, "+OK\r\n", 5, 0);
+                    }
+                    else
+                    {
+                        // Handle error: echo command without a message
+                        std::string error_response = "-ERR wrong number of arguments for 'set' command\r\n";
+                        send(fd, error_response.c_str(), error_response.length(), 0);
+                    }
+                }
+                else if (strcasecmp(command.c_str(), "GET") == 0)
+                {
+                    if (rep.array().size() > 1 && rep.array()[1].type() == resp::ty_bulkstr)
+                    {
+                        std::string key = rep.array()[1].bulkstr().data();
+                        std::string message = umap[key];
+                        std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
+                        send(fd, response.c_str(), response.length(), 0);
+                    }
+                    else
+                    {
+                        // Handle error: echo command without a message
+                        std::string error_response = "-ERR wrong number of arguments for 'get' command\r\n";
                         send(fd, error_response.c_str(), error_response.length(), 0);
                     }
                 }
