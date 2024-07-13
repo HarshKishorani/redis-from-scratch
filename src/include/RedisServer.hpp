@@ -6,9 +6,10 @@
 #include <netdb.h>
 #include <cstring>
 #include <thread>
-#include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
 #include <unordered_map>
+#include <chrono>
 #include <cassert>
+#include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
 
 class RedisServer
 {
@@ -31,11 +32,10 @@ private:
     int PORT = 6379;
     int CONNECTION_BACKLOG = 5;
     int server_fd_ = -1;
-    std::unordered_map<std::string, std::string> umap;
+    std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> umap;
 
     void handleRequest(int fd)
     {
-        // This is Redis Simple String for PONG reply to Ping
         char buff[BUFFER_SIZE] = "";
 
         while (true)
@@ -68,40 +68,56 @@ private:
                     }
                     else
                     {
-                        // Handle error: echo command without a message
                         std::string error_response = "-ERR wrong number of arguments for 'echo' command\r\n";
                         send(fd, error_response.c_str(), error_response.length(), 0);
                     }
                 }
                 else if (strcasecmp(command.c_str(), "set") == 0)
                 {
-                    if (rep.array().size() > 2 && rep.array()[1].type() == resp::ty_bulkstr)
+                    if (rep.array().size() >= 3 && rep.array()[1].type() == resp::ty_bulkstr)
                     {
                         std::string key = rep.array()[1].bulkstr().data();
                         std::string value = rep.array()[2].bulkstr().data();
-                        umap[key] = value;
-                        assert(umap[key] == value);
+                        if (rep.array().size() == 5 && strcasecmp(rep.array()[3].bulkstr().data(), "px") == 0 && rep.array()[4].type() == resp::ty_bulkstr)
+                        {
+                            int expiry_ms = std::stoi(rep.array()[4].bulkstr().data());
+                            auto expiry_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(expiry_ms);
+                            umap[key] = {value, expiry_time};
+                        }
+                        else
+                        {
+                            umap[key] = {value, std::chrono::steady_clock::time_point::max()};
+                        }
+                        assert(umap[key].first == value);
                         send(fd, "+OK\r\n", 5, 0);
                     }
                     else
                     {
-                        // Handle error: echo command without a message
                         std::string error_response = "-ERR wrong number of arguments for 'set' command\r\n";
                         send(fd, error_response.c_str(), error_response.length(), 0);
                     }
                 }
-                else if (strcasecmp(command.c_str(), "GET") == 0)
+                else if (strcasecmp(command.c_str(), "get") == 0)
                 {
                     if (rep.array().size() > 1 && rep.array()[1].type() == resp::ty_bulkstr)
                     {
                         std::string key = rep.array()[1].bulkstr().data();
-                        std::string message = umap[key];
-                        std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
-                        send(fd, response.c_str(), response.length(), 0);
+                        auto it = umap.find(key);
+                        if (it != umap.end() && it->second.second > std::chrono::steady_clock::now())
+                        {
+                            std::string message = it->second.first;
+                            std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
+                            send(fd, response.c_str(), response.length(), 0);
+                        }
+                        else
+                        {
+                            std::string error_response = "$-1\r\n";
+                            send(fd, error_response.c_str(), error_response.length(), 0);
+                            umap.erase(it);
+                        }
                     }
                     else
                     {
-                        // Handle error: echo command without a message
                         std::string error_response = "-ERR wrong number of arguments for 'get' command\r\n";
                         send(fd, error_response.c_str(), error_response.length(), 0);
                     }
