@@ -7,6 +7,7 @@
 #include <cstring>
 #include <thread>
 #include <vector>
+#include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
 
 class RedisServer
 {
@@ -25,39 +26,55 @@ public:
     }
 
 private:
-    int BUFFER_SIZE = 128;
+    int BUFFER_SIZE = 4096;
     int PORT = 6379;
     int CONNECTION_BACKLOG = 5;
     int server_fd_ = -1;
 
     void handleRequest(int fd)
     {
-        std::string message = "+PONG\r\n";
+        // This is Redis Simple String for PONG reply to Ping
         char buff[BUFFER_SIZE] = "";
 
         while (true)
         {
+            resp::decoder dec;
             memset(buff, 0, sizeof(buff));
-            ssize_t bytes_received = recv(fd, buff, 15, 0);
+            ssize_t bytes_received = recv(fd, buff, sizeof(buff), 0); // receive from client
             if (bytes_received <= 0)
             {
-                std::cerr << "Failed to receive data or connection closed\n";
-                close(fd);
                 return;
             }
 
-            if (strcasecmp(buff, "*1\r\n$4\r\nping\r\n") != 0)
+            resp::result res = dec.decode(buff, std::strlen(buff));
+            resp::unique_value rep = res.value();
+            if ((rep.type() == resp::ty_array) && (rep.array()[0].type() == resp::ty_bulkstr))
             {
-                memset(buff, 0, sizeof(buff));
-                continue;
-            }
-
-            ssize_t bytes_sent = send(fd, message.c_str(), message.length(), 0);
-            if (bytes_sent < 0)
-            {
-                std::cerr << "Failed to send response\n";
-                close(fd);
-                return;
+                std::string command = rep.array()[0].bulkstr().data();
+                if (strcasecmp(command.c_str(), "ping") == 0)
+                {
+                    // Simple String in RESP : https://redis.io/docs/latest/develop/reference/protocol-spec/#simple-strings
+                    send(fd, "+PONG\r\n", 7, 0);
+                }
+                else if (strcasecmp(command.c_str(), "echo") == 0)
+                {
+                    if (rep.array().size() > 1 && rep.array()[1].type() == resp::ty_bulkstr)
+                    {
+                        std::string message = rep.array()[1].bulkstr().data();
+                        std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
+                        send(fd, response.c_str(), response.length(), 0);
+                    }
+                    else
+                    {
+                        // Handle error: echo command without a message
+                        std::string error_response = "-ERR wrong number of arguments for 'echo' command\r\n";
+                        send(fd, error_response.c_str(), error_response.length(), 0);
+                    }
+                }
+                else
+                {
+                    break;
+                }
             }
         }
     }
@@ -78,6 +95,7 @@ private:
              + Send and receive data
         */
 
+        // Server Side setup
         server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
         if (server_fd_ < 0)
         {
