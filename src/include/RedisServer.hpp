@@ -1,3 +1,5 @@
+// https://redis.io/docs/latest/develop/reference/protocol-spec/
+
 #include <iostream>
 #include <unistd.h>
 #include <sys/types.h>
@@ -14,8 +16,9 @@
 class RedisServer
 {
 public:
-    RedisServer()
+    RedisServer(int DEFAULT_PORT = 6379)
     {
+        PORT = DEFAULT_PORT;
         initServer();
     }
 
@@ -29,7 +32,7 @@ public:
 
 private:
     int BUFFER_SIZE = 4096;
-    int PORT = 6379;
+    int PORT;
     int CONNECTION_BACKLOG = 5;
     int server_fd_ = -1;
     std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> umap;
