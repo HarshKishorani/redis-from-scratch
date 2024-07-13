@@ -20,7 +20,6 @@ int main(int argc, char *argv[])
     std::cout << "No arguments were provided." << std::endl;
   }
 
-  // Example of using a specific argument, e.g., --port
   std::string port;
   for (int i = 1; i < argc; ++i)
   {
