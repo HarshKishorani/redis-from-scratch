@@ -196,9 +196,18 @@ private:
         {
             info(fd, rep);
         }
-        else
+        else if (strcasecmp(command.c_str(), "REPLCONF") == 0)
         {
             send(fd, "+OK\r\n", 5, 0);
+        }
+        else if (strcasecmp(command.c_str(), "PSYNC") == 0)
+        {
+            std::string fullresync_response = "+FULLRESYNC " + server_config.master_replid + " 0\r\n";
+            send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
+        }
+        else
+        {
+            return -1;
         }
         return 0;
     }
@@ -325,6 +334,38 @@ private:
         // The second time, it'll be sent like this: REPLCONF capa psync2.
         // This is the replica notifying the master of its capabilities ("capa" is short for "capabilities")
         message = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+        if (send(master_fd, message.c_str(), message.length(), 0) < 0)
+        {
+            std::cerr << "Failed to send PING command to master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
+        {
+            std::cerr << "Failed to receive PONG response from master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        std::cout << "Received from master: " << buffer << std::endl;
+        memset(buffer, 0, sizeof(buffer));
+
+        /*
+        Step 3 :
+        After receiving a response to the second REPLCONF, the replica then sends a PSYNC command to the master.
+
+        The PSYNC command is used to synchronize the state of the replica with the master.
+        The replica will send this command to the master with two arguments:
+
+        1. The first argument is the replication ID of the master
+            Since this is the first time the replica is connecting to the master, the replication ID will be ? (a question mark)
+        2. The second argument is the offset of the master
+            Since this is the first time the replica is connecting to the master, the offset will be -1
+            So the final command sent will be PSYNC ? -1.
+
+        The master will respond with a Simple string that looks like this:
+        +FULLRESYNC <REPL_ID> 0\r\n
+        */
+        message = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
         if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
             std::cerr << "Failed to send PING command to master\n";
