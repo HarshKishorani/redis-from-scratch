@@ -13,6 +13,16 @@
 #include <cassert>
 #include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
 
+struct server_metadata
+{
+    int port = 6379;
+    bool is_replica = false;
+    std::string master;
+
+    server_metadata() = default;
+    server_metadata(int port, bool is_replica, std::string master) : port(port), is_replica(is_replica), master(master) {}
+};
+
 struct redisServerConfig
 {
     std::string role = "master";
@@ -24,16 +34,18 @@ struct redisServerConfig
     int repl_backlog_size = 1048576;
     int repl_backlog_first_byte_offset = 0;
     int repl_backlog_histlen = 0;
+
+    redisServerConfig() = default;
 };
 
 /// @brief Initialize and start a Redis Server
 class RedisServer
 {
 public:
-    RedisServer(int DEFAULT_PORT = 6379, std::string master = "") : server_config{}
+    RedisServer(server_metadata server_meta = server_metadata()) : server_config{}
     {
-        PORT = DEFAULT_PORT;
-        if (!master.empty())
+        PORT = server_meta.port;
+        if (server_meta.is_replica)
             server_config.role = "slave";
         initServer();
     }
