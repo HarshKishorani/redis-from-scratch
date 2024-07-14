@@ -41,7 +41,34 @@ private:
 
     void info(int fd, resp::unique_value &rep)
     {
-        // TODO : Implement this
+        // Check if the command includes the replication section
+        if (rep.array().size() > 1 && rep.array()[1].type() == resp::ty_bulkstr)
+        {
+            std::string section = rep.array()[1].bulkstr().data();
+            if (strcasecmp(section.c_str(), "replication") == 0)
+            {
+                // Construct the response for the replication section
+                std::string response =
+                    "# Replication\r\n"
+                    "role:master\r\n"
+                    "connected_slaves:0\r\n"
+                    "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
+                    "master_repl_offset:0\r\n"
+                    "second_repl_offset:-1\r\n"
+                    "repl_backlog_active:0\r\n"
+                    "repl_backlog_size:1048576\r\n"
+                    "repl_backlog_first_byte_offset:0\r\n"
+                    "repl_backlog_histlen:0\r\n";
+
+                std::string bulk_response = "$" + std::to_string(response.length()) + "\r\n" + response + "\r\n";
+                send(fd, bulk_response.c_str(), bulk_response.length(), 0);
+                return;
+            }
+        }
+
+        // Default error response if the section is not supported
+        std::string error_response = "-ERR unsupported INFO section\r\n";
+        send(fd, error_response.c_str(), error_response.length(), 0);
     }
 
     void echo(int fd, resp::unique_value &rep)
@@ -134,6 +161,10 @@ private:
         else if (strcasecmp(command.c_str(), "get") == 0)
         {
             getValue(fd, rep);
+        }
+        else if (strcasecmp(command.c_str(), "info") == 0)
+        {
+            info(fd, rep);
         }
         else
         {
