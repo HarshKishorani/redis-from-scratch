@@ -13,13 +13,28 @@
 #include <cassert>
 #include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
 
+struct redisServerConfig
+{
+    std::string role = "master";
+    int connected_slaves = 0;
+    std::string master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
+    int master_repl_offset = 0;
+    int second_repl_offset = -1;
+    int repl_backlog_active = 0;
+    int repl_backlog_size = 1048576;
+    int repl_backlog_first_byte_offset = 0;
+    int repl_backlog_histlen = 0;
+};
+
 /// @brief Initialize and start a Redis Server
 class RedisServer
 {
 public:
-    RedisServer(int DEFAULT_PORT = 6379)
+    RedisServer(int DEFAULT_PORT = 6379, std::string master = "") : server_config{}
     {
         PORT = DEFAULT_PORT;
+        if (!master.empty())
+            server_config.role = "slave";
         initServer();
     }
 
@@ -32,7 +47,7 @@ public:
     }
 
 private:
-    std::string role;
+    redisServerConfig server_config;
     int BUFFER_SIZE = 4096;
     int PORT;
     int CONNECTION_BACKLOG = 5;
@@ -50,15 +65,16 @@ private:
                 // Construct the response for the replication section
                 std::string response =
                     "# Replication\r\n"
-                    "role:master\r\n"
-                    "connected_slaves:0\r\n"
-                    "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
-                    "master_repl_offset:0\r\n"
-                    "second_repl_offset:-1\r\n"
-                    "repl_backlog_active:0\r\n"
-                    "repl_backlog_size:1048576\r\n"
-                    "repl_backlog_first_byte_offset:0\r\n"
-                    "repl_backlog_histlen:0\r\n";
+                    "role:" +
+                    server_config.role + "\r\n" +
+                    "connected_slaves:" + std::to_string(server_config.connected_slaves) + "\r\n" +
+                    "master_replid:" + server_config.master_replid + "\r\n" +
+                    "master_repl_offset:" + std::to_string(server_config.master_repl_offset) + "\r\n" +
+                    "second_repl_offset:" + std::to_string(server_config.second_repl_offset) + "\r\n" +
+                    "repl_backlog_active:" + std::to_string(server_config.repl_backlog_active) + "\r\n" +
+                    "repl_backlog_size:" + std::to_string(server_config.repl_backlog_size) + "\r\n" +
+                    "repl_backlog_first_byte_offset:" + std::to_string(server_config.repl_backlog_first_byte_offset) + "\r\n" +
+                    "repl_backlog_histlen:" + std::to_string(server_config.repl_backlog_histlen) + "\r\n";
 
                 std::string bulk_response = "$" + std::to_string(response.length()) + "\r\n" + response + "\r\n";
                 send(fd, bulk_response.c_str(), bulk_response.length(), 0);
@@ -173,7 +189,7 @@ private:
         return 0;
     }
 
-    /// @brief Handle Incoming requests from clients in a seprate thread.
+    /// @brief Handle Incoming requests from clients in a separate thread.
     /// @param fd connection on socket FD.
     void handleRequest(int fd)
     {

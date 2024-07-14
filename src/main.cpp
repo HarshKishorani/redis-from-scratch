@@ -21,13 +21,17 @@ int main(int argc, char *argv[])
   }
 
   std::string port;
+  std::string master;
   for (int i = 1; i < argc; ++i)
   {
     std::string arg = argv[i];
     if (arg == "--port" && i + 1 < argc)
     {
       port = argv[i + 1];
-      break;
+    }
+    else if (arg == "--replicaof" && i + 1 < argc)
+    {
+      master = argv[i + 1];
     }
   }
 
@@ -37,7 +41,7 @@ int main(int argc, char *argv[])
     if (!port.empty())
     {
       std::cout << "Port specified: " << port << std::endl;
-      RedisServer redisServer = RedisServer(std::stoi(port));
+      RedisServer redisServer = RedisServer(std::stoi(port), master);
     }
     else
     {
