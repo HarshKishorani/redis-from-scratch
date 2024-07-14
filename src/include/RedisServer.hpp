@@ -44,6 +44,7 @@ class RedisServer
 public:
     RedisServer(server_metadata server_meta = server_metadata()) : server_config{}
     {
+        this->server_meta = server_meta;
         PORT = server_meta.port;
         if (server_meta.is_replica)
             server_config.role = "slave";
@@ -60,6 +61,7 @@ public:
 
 private:
     redisServerConfig server_config;
+    server_metadata server_meta;
     int BUFFER_SIZE = 4096;
     int PORT;
     int CONNECTION_BACKLOG = 5;
@@ -231,6 +233,68 @@ private:
         }
     }
 
+    void connect_master()
+    {
+        std::string master = server_meta.master;
+        if (master.empty())
+        {
+            std::cerr << "Master not found \n";
+            std::exit(EXIT_FAILURE);
+        }
+
+        // Split the master string into host and port
+        size_t space_pos = master.find(' ');
+        std::string master_host = master.substr(0, space_pos);
+        if (master_host == "localhost")
+        {
+            master_host = "127.0.0.1";
+        }
+        int master_port = std::stoi(master.substr(space_pos + 1));
+
+        int master_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (master_fd < 0)
+        {
+            std::cerr << "Failed to create socket for master connection\n";
+            std::exit(EXIT_FAILURE);
+        }
+
+        struct sockaddr_in master_addr;
+        master_addr.sin_family = AF_INET;
+        master_addr.sin_port = htons(master_port);
+        if (inet_pton(AF_INET, master_host.c_str(), &master_addr.sin_addr) <= 0)
+        {
+            std::cerr << "Invalid address/ Address not supported \n";
+            std::exit(EXIT_FAILURE);
+        }
+
+        if (connect(master_fd, reinterpret_cast<struct sockaddr *>(&master_addr), sizeof(master_addr)) < 0)
+        {
+            std::cerr << "Connection to master failed\n";
+            std::exit(EXIT_FAILURE);
+        }
+
+        // Send PING command as a RESP Array
+        std::string ping_command = "*1\r\n$4\r\nPING\r\n";
+        if (send(master_fd, ping_command.c_str(), ping_command.length(), 0) < 0)
+        {
+            std::cerr << "Failed to send PING command to master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+
+        // Receive PONG response
+        char buffer[1024] = {0};
+        if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
+        {
+            std::cerr << "Failed to receive PONG response from master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        std::cout << "Received from master: " << buffer << std::endl;
+
+        close(master_fd);
+    }
+
     /// @brief Initialze the server using socket and start accepting concurrent requests from clients.
     void initServer()
     {
@@ -278,6 +342,12 @@ private:
         {
             std::cerr << "listen failed\n";
             std::exit(EXIT_FAILURE);
+        }
+
+        if (server_config.role == "slave")
+        {
+            std::cout << "Connecting to master....." << server_meta.master << std::endl;
+            connect_master();
         }
 
         std::cout << "Waiting for a client to connect...\n";
