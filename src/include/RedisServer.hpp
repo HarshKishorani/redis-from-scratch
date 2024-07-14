@@ -198,7 +198,7 @@ private:
         }
         else
         {
-            return -1;
+            send(fd, "+OK\r\n", 5, 0);
         }
         return 0;
     }
@@ -233,8 +233,17 @@ private:
         }
     }
 
+    /*
+    When a replica connects to a master, it needs to go through a handshake process before receiving updates from the master.
+
+    There are three parts to this handshake:
+    - The replica sends a PING to the master.
+    - The replica sends REPLCONF twice to the master.
+    - The replica sends PSYNC to the master.
+    */
     void connect_master()
     {
+        char buffer[1024] = {0};
         std::string master = server_meta.master;
         if (master.empty())
         {
@@ -273,9 +282,9 @@ private:
             std::exit(EXIT_FAILURE);
         }
 
-        // Send PING command as a RESP Array
-        std::string ping_command = "*1\r\n$4\r\nPING\r\n";
-        if (send(master_fd, ping_command.c_str(), ping_command.length(), 0) < 0)
+        // Step 1 : Send PING command as a RESP Array to the master and Receive PONG.
+        std::string message = "*1\r\n$4\r\nPING\r\n";
+        if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
             std::cerr << "Failed to send PING command to master\n";
             close(master_fd);
@@ -283,7 +292,6 @@ private:
         }
 
         // Receive PONG response
-        char buffer[1024] = {0};
         if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
         {
             std::cerr << "Failed to receive PONG response from master\n";
@@ -291,6 +299,46 @@ private:
             std::exit(EXIT_FAILURE);
         }
         std::cout << "Received from master: " << buffer << std::endl;
+        memset(buffer, 0, sizeof(buffer));
+
+        // Step 2 : After receiving a response to PING, the replica then sends 2 REPLCONF commands to the master.
+        // The REPLCONF command is used to configure replication. Replicas will send this command to the master twice:
+
+        // The first time, it'll be sent like this: REPLCONF listening-port <PORT>
+        // This is the replica notifying the master of the port it's listening on
+        message = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n";
+        if (send(master_fd, message.c_str(), message.length(), 0) < 0)
+        {
+            std::cerr << "Failed to send PING command to master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
+        {
+            std::cerr << "Failed to receive PONG response from master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        std::cout << "Received from master: " << buffer << std::endl;
+        memset(buffer, 0, sizeof(buffer));
+
+        // The second time, it'll be sent like this: REPLCONF capa psync2.
+        // This is the replica notifying the master of its capabilities ("capa" is short for "capabilities")
+        message = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+        if (send(master_fd, message.c_str(), message.length(), 0) < 0)
+        {
+            std::cerr << "Failed to send PING command to master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
+        {
+            std::cerr << "Failed to receive PONG response from master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        std::cout << "Received from master: " << buffer << std::endl;
+        memset(buffer, 0, sizeof(buffer));
 
         close(master_fd);
     }
