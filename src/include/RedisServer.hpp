@@ -196,6 +196,7 @@ private:
         {
             info(fd, rep);
         }
+        // REPLCONF and PSYNC for Replica Master Handshake. See connect_master() function below for more information.
         else if (strcasecmp(command.c_str(), "REPLCONF") == 0)
         {
             send(fd, "+OK\r\n", 5, 0);
@@ -203,6 +204,15 @@ private:
         else if (strcasecmp(command.c_str(), "PSYNC") == 0)
         {
             std::string fullresync_response = "+FULLRESYNC " + server_config.master_replid + " 0\r\n";
+            send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
+            std::string hex_bytes = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+            // RDB File Info : https://rdb.fnordig.de/file_format.html
+            std::string empty_rdb = "";
+            for (int i = 0; i < hex_bytes.length(); i += 2)
+            {
+                empty_rdb += static_cast<char>(std::stoi(hex_bytes.substr(i, 2), nullptr, 16));
+            }
+            fullresync_response = "$" + std::to_string(empty_rdb.length()) + "\r\n" + empty_rdb;
             send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
         }
         else
