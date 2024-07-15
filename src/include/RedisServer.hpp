@@ -152,19 +152,21 @@ private:
                 umap[key] = {value, std::chrono::steady_clock::time_point::max()};
             }
             assert(umap[key].first == value);
-            send(fd, "+OK\r\n", 5, 0);
-
-            // Proporgate commands to replicas
-            resp::encoder<resp::buffer> enc;
-            std::vector<resp::buffer> buffers = enc.encode("SET", key, value);
-            std::string message;
-            for (auto it : buffers)
+            if (server_config.role == "master")
             {
-                message += it.data();
-            }
-            for (const int &replica : connectedReplicas)
-            {
-                send(replica, message.c_str(), message.length(), 0);
+                send(fd, "+OK\r\n", 5, 0);
+                // Proporgate commands to replicas
+                resp::encoder<resp::buffer> enc;
+                std::vector<resp::buffer> buffers = enc.encode("SET", key, value);
+                std::string message;
+                for (auto it : buffers)
+                {
+                    message += it.data();
+                }
+                for (const int &replica : connectedReplicas)
+                {
+                    send(replica, message.c_str(), message.length(), 0);
+                }
             }
         }
         else
@@ -180,8 +182,9 @@ private:
         {
             std::string key = rep.array()[1].bulkstr().data();
             auto it = umap.find(key);
-            if (it != umap.end() && it->second.second > std::chrono::steady_clock::now())
+            if (it->second.second > std::chrono::steady_clock::now())
             {
+                std::cout << "For " << key << " " << (it != umap.end()) << " " << (it->second.second > std::chrono::steady_clock::now()) << std::endl;
                 std::string message = it->second.first;
                 std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
                 send(fd, response.c_str(), response.length(), 0);
