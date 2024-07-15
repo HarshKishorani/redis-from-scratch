@@ -339,7 +339,6 @@ private:
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
-        std::cout << "Received from master: " << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         // Step 2 : After receiving a response to PING, the replica then sends 2 REPLCONF commands to the master.
@@ -360,7 +359,6 @@ private:
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
-        std::cout << "Received from master: " << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         // The second time, it'll be sent like this: REPLCONF capa psync2.
@@ -378,7 +376,6 @@ private:
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
-        std::cout << "Received from master: " << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         /*
@@ -410,10 +407,10 @@ private:
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
-        std::cout << "Received from master: " << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
-        close(master_fd);
+        std::cout << "Starting Request Handler for master fd : " << master_fd << std::endl;
+        std::thread(&RedisServer::handleRequest, this, master_fd).detach();
     }
 
     /// @brief Initialze the server using socket and start accepting concurrent requests from clients.
