@@ -8,7 +8,7 @@
 #include <netdb.h>
 #include <cstring>
 #include <thread>
-#include <unordered_map>
+#include <bits/stdc++.h>
 #include <chrono>
 #include <cassert>
 #include "resp/all.hpp" // Repo Link : https://github.com/nousxiong/resp
@@ -67,6 +67,25 @@ private:
     int CONNECTION_BACKLOG = 5;
     int server_fd_ = -1;
     std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> umap;
+    std::unordered_set<int> connectedReplicas;
+
+    void psync(int fd, resp::unique_value &rep)
+    {
+        std::string fullresync_response = "+FULLRESYNC " + server_config.master_replid + " 0\r\n";
+        send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
+        std::string hex_bytes = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+        // RDB File Info : https://rdb.fnordig.de/file_format.html
+        std::string empty_rdb = "";
+        for (int i = 0; i < hex_bytes.length(); i += 2)
+        {
+            empty_rdb += static_cast<char>(std::stoi(hex_bytes.substr(i, 2), nullptr, 16));
+        }
+        fullresync_response = "$" + std::to_string(empty_rdb.length()) + "\r\n" + empty_rdb;
+        send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
+
+        // Store fd for proporgation of commands
+        connectedReplicas.insert(fd);
+    }
 
     void info(int fd, resp::unique_value &rep)
     {
@@ -134,6 +153,19 @@ private:
             }
             assert(umap[key].first == value);
             send(fd, "+OK\r\n", 5, 0);
+
+            // Proporgate commands to replicas
+            resp::encoder<resp::buffer> enc;
+            std::vector<resp::buffer> buffers = enc.encode("SET", key, value);
+            std::string message;
+            for (auto it : buffers)
+            {
+                message += it.data();
+            }
+            for (const int &replica : connectedReplicas)
+            {
+                send(replica, message.c_str(), message.length(), 0);
+            }
         }
         else
         {
@@ -203,17 +235,7 @@ private:
         }
         else if (strcasecmp(command.c_str(), "PSYNC") == 0)
         {
-            std::string fullresync_response = "+FULLRESYNC " + server_config.master_replid + " 0\r\n";
-            send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
-            std::string hex_bytes = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
-            // RDB File Info : https://rdb.fnordig.de/file_format.html
-            std::string empty_rdb = "";
-            for (int i = 0; i < hex_bytes.length(); i += 2)
-            {
-                empty_rdb += static_cast<char>(std::stoi(hex_bytes.substr(i, 2), nullptr, 16));
-            }
-            fullresync_response = "$" + std::to_string(empty_rdb.length()) + "\r\n" + empty_rdb;
-            send(fd, fullresync_response.c_str(), fullresync_response.length(), 0);
+            psync(fd, rep);
         }
         else
         {
