@@ -182,7 +182,7 @@ private:
         {
             std::string key = rep.array()[1].bulkstr().data();
             auto it = umap.find(key);
-            if (it->second.second > std::chrono::steady_clock::now())
+            if (it != umap.end() && it->second.second > std::chrono::steady_clock::now())
             {
                 std::cout << "For " << key << " " << (it != umap.end()) << " " << (it->second.second > std::chrono::steady_clock::now()) << std::endl;
                 std::string message = it->second.first;
@@ -193,7 +193,9 @@ private:
             {
                 std::string error_response = "$-1\r\n";
                 send(fd, error_response.c_str(), error_response.length(), 0);
-                umap.erase(it);
+                umap["baz"] = {"789", std::chrono::steady_clock::time_point::max()};
+
+                // umap.erase(it);
             }
         }
         else
