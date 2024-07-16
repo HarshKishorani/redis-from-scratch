@@ -152,6 +152,7 @@ private:
                 umap[key] = {value, std::chrono::steady_clock::time_point::max()};
             }
             assert(umap[key].first == value);
+            std::cout << "Set value of " << key << " to " << umap[key].first << std::endl;
             if (server_config.role == "master")
             {
                 send(fd, "+OK\r\n", 5, 0);
@@ -193,8 +194,6 @@ private:
             {
                 std::string error_response = "$-1\r\n";
                 send(fd, error_response.c_str(), error_response.length(), 0);
-                umap["baz"] = {"789", std::chrono::steady_clock::time_point::max()};
-
                 // umap.erase(it);
             }
         }
