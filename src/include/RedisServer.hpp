@@ -141,6 +141,7 @@ private:
         {
             std::string key = rep.array()[1].bulkstr().data();
             std::string value = rep.array()[2].bulkstr().data();
+            std::cout << "Setting value of " << key << " to " << value << std::endl;
             if (rep.array().size() == 5 && strcasecmp(rep.array()[3].bulkstr().data(), "px") == 0 && rep.array()[4].type() == resp::ty_bulkstr)
             {
                 int expiry_ms = std::stoi(rep.array()[4].bulkstr().data());
@@ -185,7 +186,6 @@ private:
             auto it = umap.find(key);
             if (it != umap.end() && it->second.second > std::chrono::steady_clock::now())
             {
-                std::cout << "For " << key << " " << (it != umap.end()) << " " << (it->second.second > std::chrono::steady_clock::now()) << std::endl;
                 std::string message = it->second.first;
                 std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
                 send(fd, response.c_str(), response.length(), 0);
@@ -286,7 +286,7 @@ private:
     - The replica sends REPLCONF twice to the master.
     - The replica sends PSYNC to the master.
     */
-    void connect_master()
+    int connect_master()
     {
         char buffer[1024] = {0};
         std::string master = server_meta.master;
@@ -412,9 +412,7 @@ private:
             std::exit(EXIT_FAILURE);
         }
         memset(buffer, 0, sizeof(buffer));
-
-        std::cout << "Starting Request Handler for master fd : " << master_fd << std::endl;
-        std::thread(&RedisServer::handleRequest, this, master_fd).detach();
+        return master_fd;
     }
 
     /// @brief Initialze the server using socket and start accepting concurrent requests from clients.
@@ -466,10 +464,11 @@ private:
             std::exit(EXIT_FAILURE);
         }
 
+        int master_fd = -1;
         if (server_config.role == "slave")
         {
             std::cout << "Connecting to master....." << server_meta.master << std::endl;
-            connect_master();
+            master_fd = connect_master();
         }
 
         std::cout << "Waiting for a client to connect...\n";
@@ -480,6 +479,8 @@ private:
         // Handle concurrent requests
         while (true)
         {
+            if (master_fd != -1)
+                std::thread(&RedisServer::handleRequest, this, master_fd).detach();
             int client_fd = accept(server_fd_, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_len);
             if (client_fd < 0)
             {
@@ -487,7 +488,6 @@ private:
                 std::exit(EXIT_FAILURE);
             }
 
-            std::cout << "Client connected. Handling Request\n";
             std::thread(&RedisServer::handleRequest, this, client_fd).detach(); // Handle concurrent clients using Threads
         }
     }
