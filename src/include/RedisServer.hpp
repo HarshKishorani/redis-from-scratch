@@ -141,7 +141,6 @@ private:
         {
             std::string key = rep.array()[1].bulkstr().data();
             std::string value = rep.array()[2].bulkstr().data();
-            std::cout << "Setting value of " << key << " to " << value << std::endl;
             if (rep.array().size() == 5 && strcasecmp(rep.array()[3].bulkstr().data(), "px") == 0 && rep.array()[4].type() == resp::ty_bulkstr)
             {
                 int expiry_ms = std::stoi(rep.array()[4].bulkstr().data());
@@ -153,7 +152,6 @@ private:
                 umap[key] = {value, std::chrono::steady_clock::time_point::max()};
             }
             assert(umap[key].first == value);
-            std::cout << "Set value of " << key << " to " << umap[key].first << std::endl;
             if (server_config.role == "master")
             {
                 send(fd, "+OK\r\n", 5, 0);
@@ -204,6 +202,29 @@ private:
         }
     }
 
+    void replconf(int fd, resp::unique_value &rep)
+    {
+        if (rep.array().size() >= 3 && rep.array()[1].type() == resp::ty_bulkstr)
+        {
+            std::string key = rep.array()[1].bulkstr().data();
+            std::string value = rep.array()[2].bulkstr().data();
+            if (strcasecmp(key.c_str(), "GETACK") == 0)
+            {
+                std::string ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
+                send(fd, ack.c_str(), ack.length(), 0);
+            }
+            else
+            {
+                send(fd, "+OK\r\n", 5, 0);
+            }
+        }
+        else
+        {
+            std::string error_response = "-ERR wrong number of arguments for 'replconf' command\r\n";
+            send(fd, error_response.c_str(), error_response.length(), 0);
+        }
+    }
+
     /// @brief Processes Decoded commands from client request.
     /// @param fd
     /// @param command
@@ -235,7 +256,7 @@ private:
         // REPLCONF and PSYNC for Replica Master Handshake. See connect_master() function below for more information.
         else if (strcasecmp(command.c_str(), "REPLCONF") == 0)
         {
-            send(fd, "+OK\r\n", 5, 0);
+            replconf(fd, rep);
         }
         else if (strcasecmp(command.c_str(), "PSYNC") == 0)
         {
@@ -252,25 +273,58 @@ private:
     /// @param fd connection on socket FD.
     void handleRequest(int fd)
     {
+        resp::decoder dec;
         char buff[BUFFER_SIZE] = "";
 
         // Handle multiple requests
         while (true)
         {
-            resp::decoder dec;
             memset(buff, 0, sizeof(buff));
             ssize_t bytes_received = recv(fd, buff, sizeof(buff), 0); // receive from client
             if (bytes_received <= 0)
             {
                 return;
             }
-
+            std::cout << "Received command from client : ";
             resp::result request = dec.decode(buff, std::strlen(buff));
             resp::unique_value rep = request.value();
             if ((rep.type() == resp::ty_array) && (rep.array()[0].type() == resp::ty_bulkstr))
             {
                 std::string command = rep.array()[0].bulkstr().data();
+                std::cout << command << std::endl;
                 if (processCommand(fd, command, rep) < 0)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// @brief Handle Incoming requests from master in a separate thread.
+    /// @param fd connection on socket FD.
+    void handleMasterConnection(int master_fd)
+    {
+        resp::decoder dec;
+        char buff[BUFFER_SIZE] = "";
+
+        while (true)
+        {
+            memset(buff, 0, sizeof(buff));
+            ssize_t bytes_received = recv(master_fd, buff, sizeof(buff), 0); // receive from master
+            if (bytes_received <= 0)
+            {
+                // close(master_fd);
+                // return;
+                continue;
+            }
+            std::cout << "Received command from master : " << std::string(buff).length();
+            resp::result request = dec.decode(buff, std::strlen(buff));
+            resp::unique_value rep = request.value();
+            if ((rep.type() == resp::ty_array) && (rep.array()[0].type() == resp::ty_bulkstr))
+            {
+                std::string command = rep.array()[0].bulkstr().data();
+                std::cout << command << std::endl;
+                if (processCommand(master_fd, command, rep) < 0)
                 {
                     break;
                 }
@@ -329,13 +383,13 @@ private:
 
         // Step 1 : Send PING command as a RESP Array to the master and Receive PONG.
         std::string message = "*1\r\n$4\r\nPING\r\n";
+        std::cout << "Sending PING to master...\n";
         if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
             std::cerr << "Failed to send PING command to master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
-
         // Receive PONG response
         if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
         {
@@ -343,6 +397,7 @@ private:
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
+        std::cout << "Received for PING from master..." << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         // Step 2 : After receiving a response to PING, the replica then sends 2 REPLCONF commands to the master.
@@ -351,35 +406,39 @@ private:
         // The first time, it'll be sent like this: REPLCONF listening-port <PORT>
         // This is the replica notifying the master of the port it's listening on
         message = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n";
+        std::cout << "Sending (REPLCONF listening-port <PORT>) to master...\n";
         if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
-            std::cerr << "Failed to send PING command to master\n";
+            std::cerr << "Failed to send (REPLCONF listening-port <PORT>) command to master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
         if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
         {
-            std::cerr << "Failed to receive PONG response from master\n";
+            std::cerr << "Failed to receive (REPLCONF listening-port <PORT>) response from master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
+        std::cout << "Received for (REPLCONF listening-port <PORT>) from master..." << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         // The second time, it'll be sent like this: REPLCONF capa psync2.
         // This is the replica notifying the master of its capabilities ("capa" is short for "capabilities")
         message = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+        std::cout << "Sending (REPLCONF capa psync2) to master...\n";
         if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
-            std::cerr << "Failed to send PING command to master\n";
+            std::cerr << "Failed to send (REPLCONF capa psync2) command to master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
         if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
         {
-            std::cerr << "Failed to receive PONG response from master\n";
+            std::cerr << "Failed to receive (REPLCONF capa psync2) response from master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
+        std::cout << "Received for (REPLCONF capa psync2) from master..." << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
 
         /*
@@ -399,19 +458,36 @@ private:
         +FULLRESYNC <REPL_ID> 0\r\n
         */
         message = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+        std::cout << "Sending (PSYNC ? -1) to master...\n";
         if (send(master_fd, message.c_str(), message.length(), 0) < 0)
         {
-            std::cerr << "Failed to send PING command to master\n";
+            std::cerr << "Failed to send (PSYNC ? -1) command to master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
         if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
         {
-            std::cerr << "Failed to receive PONG response from master\n";
+            std::cerr << "Failed to receive (PSYNC ? -1) response from master\n";
             close(master_fd);
             std::exit(EXIT_FAILURE);
         }
+        std::cout << "Received for (PSYNC ? -1) from master..." << buffer << std::endl;
         memset(buffer, 0, sizeof(buffer));
+
+        if (master_fd != -1)
+            std::thread(&RedisServer::handleMasterConnection, this, master_fd).detach();
+
+        // Receive RDB File
+        if (recv(master_fd, buffer, sizeof(buffer), 0) < 0)
+        {
+            std::cerr << "Failed to receive RDB response from master\n";
+            close(master_fd);
+            std::exit(EXIT_FAILURE);
+        }
+        std::cout << "Received RDB from master..." << buffer << std::endl;
+        memset(buffer, 0, sizeof(buffer));
+
+        std::cout << "Connected to master.\n";
         return master_fd;
     }
 
@@ -469,6 +545,8 @@ private:
         {
             std::cout << "Connecting to master....." << server_meta.master << std::endl;
             master_fd = connect_master();
+            // if (master_fd != -1)
+            //     std::thread(&RedisServer::handleMasterConnection, this, master_fd).detach();
         }
 
         std::cout << "Waiting for a client to connect...\n";
@@ -479,8 +557,6 @@ private:
         // Handle concurrent requests
         while (true)
         {
-            if (master_fd != -1)
-                std::thread(&RedisServer::handleRequest, this, master_fd).detach();
             int client_fd = accept(server_fd_, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_len);
             if (client_fd < 0)
             {
